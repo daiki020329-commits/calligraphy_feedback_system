@@ -9,10 +9,15 @@ output/
 user_data/
 calligraphy_data/
 reference_data/
+experiment/user_data_image_only/
+experiment/user_data_no_feedback/
+experiment/personal_data/
 
 # ===== Data files =====
 *.npy
 *.json
+*.csv
+*.png
 
 # ===== OS / Editor =====
 .DS_Store
