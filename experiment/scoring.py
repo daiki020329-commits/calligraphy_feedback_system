@@ -43,6 +43,17 @@ def _extract_xy_sequences(stroke_data: dict) -> list[np.ndarray]:
     return sequences
 
 
+def _extract_pressure_sequences(stroke_data: dict) -> list[np.ndarray]:
+    """ストロークデータから各ストロークの筆圧列を抽出する。"""
+    sequences = []
+    for stroke in stroke_data.get("strokes", []):
+        if len(stroke) < 2:
+            continue
+        pressures = np.array([[pt[2]] for pt in stroke], dtype=float)
+        sequences.append(pressures)
+    return sequences
+
+
 def compute_dtw_similarity(ref_data: dict, user_data: dict) -> float:
     """ストロークごとの DTW 距離の平均から類似度を算出する。
 
@@ -68,6 +79,36 @@ def compute_dtw_similarity(ref_data: dict, user_data: dict) -> float:
         distances.append(alignment.distance)
 
     # ストローク数の差にペナルティ
+    extra = abs(len(ref_seqs) - len(user_seqs))
+    if extra > 0:
+        penalty = max(distances) if distances else 1.0
+        distances.extend([penalty] * extra)
+
+    mean_dist = np.mean(distances)
+    return 1.0 / (1.0 + mean_dist)
+
+
+def compute_dtw_pressure_similarity(ref_data: dict, user_data: dict) -> float:
+    """ストロークごとの筆圧列の DTW 距離の平均から類似度を算出する。
+
+    類似度 = 1 / (1 + mean_distance)
+
+    Returns:
+        (0, 1] の範囲の類似度スコア
+    """
+    ref_seqs = _extract_pressure_sequences(ref_data)
+    user_seqs = _extract_pressure_sequences(user_data)
+
+    if not ref_seqs or not user_seqs:
+        return 0.0
+
+    distances = []
+    n_pairs = min(len(ref_seqs), len(user_seqs))
+
+    for i in range(n_pairs):
+        alignment = dtw(ref_seqs[i], user_seqs[i])
+        distances.append(alignment.distance)
+
     extra = abs(len(ref_seqs) - len(user_seqs))
     if extra > 0:
         penalty = max(distances) if distances else 1.0
@@ -125,6 +166,36 @@ def compute_composite_score(
 
     return {
         "dtw_similarity": round(dtw_sim, 6),
+        "ssim_similarity": round(ssim_sim, 6),
+        "composite_score": round(composite, 6),
+    }
+
+
+def compute_composite_score_v2(
+    ref_data: dict,
+    user_data: dict,
+    dtw_xy_weight: float = 0.4,
+    dtw_pressure_weight: float = 0.2,
+    ssim_weight: float = 0.4,
+) -> dict:
+    """DTW座標 + DTW筆圧 + SSIM の複合スコアを算出する。
+
+    Returns:
+        {
+            "dtw_xy_similarity": float,
+            "dtw_pressure_similarity": float,
+            "ssim_similarity": float,
+            "composite_score": float,
+        }
+    """
+    dtw_xy = compute_dtw_similarity(ref_data, user_data)
+    dtw_pressure = compute_dtw_pressure_similarity(ref_data, user_data)
+    ssim_sim = compute_ssim_similarity(ref_data, user_data)
+    composite = dtw_xy_weight * dtw_xy + dtw_pressure_weight * dtw_pressure + ssim_weight * ssim_sim
+
+    return {
+        "dtw_xy_similarity": round(dtw_xy, 6),
+        "dtw_pressure_similarity": round(dtw_pressure, 6),
         "ssim_similarity": round(ssim_sim, 6),
         "composite_score": round(composite, 6),
     }
@@ -216,9 +287,10 @@ def main():
             continue
 
         print(f"  スコアリング: {fname} ...", end=" ", flush=True)
-        scores = compute_composite_score(ref_map[character], user_data)
+        scores = compute_composite_score_v2(ref_map[character], user_data)
         print(
-            f"DTW={scores['dtw_similarity']:.4f} "
+            f"DTW_xy={scores['dtw_xy_similarity']:.4f} "
+            f"DTW_pressure={scores['dtw_pressure_similarity']:.4f} "
             f"SSIM={scores['ssim_similarity']:.4f} "
             f"Composite={scores['composite_score']:.4f}"
         )
@@ -236,7 +308,8 @@ def main():
         "filename",
         "character",
         "attempt_number",
-        "dtw_similarity",
+        "dtw_xy_similarity",
+        "dtw_pressure_similarity",
         "ssim_similarity",
         "composite_score",
     ]
