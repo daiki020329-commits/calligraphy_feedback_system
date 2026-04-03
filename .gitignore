@@ -12,6 +12,7 @@ reference_data/
 experiment/user_data_image_only/
 experiment/user_data_no_feedback/
 experiment/personal_data/
+experiment/user_data_numerical_feedback/
 
 # ===== Data files =====
 *.npy
