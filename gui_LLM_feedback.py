@@ -286,7 +286,7 @@ class FeedbackEntry(QFrame):
         text_label = QLabel(feedback_text)
         text_label.setWordWrap(True)
         text_label.setStyleSheet(
-            "font-size: 13px; color: #222; line-height: 1.5; padding: 4px 0; border: none;"
+            "font-size: 20px; color: #222; line-height: 1.5; padding: 4px 0; border: none;"
         )
         text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(text_label)

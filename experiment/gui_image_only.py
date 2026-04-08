@@ -102,8 +102,13 @@ def _smooth_pressure(stroke_data: list, window_size: int = 3) -> list[float]:
 
 def _draw_brush_segment_qp(
     painter: QPainter,
-    x1: float, y1: float, x2: float, y2: float,
-    width1: float, width2: float, alpha: int,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    width1: float,
+    width2: float,
+    alpha: int,
 ):
     length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
     if length < 0.5:
@@ -147,9 +152,9 @@ def _draw_stroke_qp(painter: QPainter, stroke: list, canvas_size: int):
         y1 = ny1 * canvas_size
         x2 = nx2 * canvas_size
         y2 = ny2 * canvas_size
-        w1 = _MIN_WIDTH + (p1 ** _PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
-        w2 = _MIN_WIDTH + (p2 ** _PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
-        alpha = 150 + int((p1 ** 1.5) * 105)
+        w1 = _MIN_WIDTH + (p1**_PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
+        w2 = _MIN_WIDTH + (p2**_PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
+        alpha = 150 + int((p1**1.5) * 105)
         _draw_brush_segment_qp(painter, x1, y1, x2, y2, w1, w2, alpha)
 
 
@@ -174,7 +179,9 @@ def _render_strokes_to_png(stroke_data: dict, size: int = 600) -> bytes:
 
 
 def _create_comparison_png(
-    ref_data: dict, user_data: dict, size: int = 600,
+    ref_data: dict,
+    user_data: dict,
+    size: int = 600,
 ) -> bytes:
     gap = 20
     label_h = 40
@@ -224,8 +231,15 @@ def _create_comparison_png(
 # FeedbackEntry
 # ---------------------------------------------------------------------------
 
+
 class FeedbackEntry(QFrame):
-    def __init__(self, attempt_number: int, comparison_png: bytes, feedback_text: str, parent=None):
+    def __init__(
+        self,
+        attempt_number: int,
+        comparison_png: bytes,
+        feedback_text: str,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet(
@@ -238,7 +252,9 @@ class FeedbackEntry(QFrame):
         layout.setSpacing(6)
 
         header = QLabel(f"Attempt #{attempt_number}")
-        header.setStyleSheet("font-weight: bold; font-size: 14px; color: #333; border: none;")
+        header.setStyleSheet(
+            "font-weight: bold; font-size: 14px; color: #333; border: none;"
+        )
         layout.addWidget(header)
 
         thumb_label = QLabel()
@@ -254,7 +270,7 @@ class FeedbackEntry(QFrame):
         text_label = QLabel(feedback_text)
         text_label.setWordWrap(True)
         text_label.setStyleSheet(
-            "font-size: 13px; color: #222; line-height: 1.5; padding: 4px 0; border: none;"
+            "font-size: 20px; color: #222; line-height: 1.5; padding: 4px 0; border: none;"
         )
         text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(text_label)
@@ -264,8 +280,11 @@ class FeedbackEntry(QFrame):
 # FeedbackWorker: 画像のみフィードバック（特徴量抽出・差分計算なし）
 # ---------------------------------------------------------------------------
 
+
 class FeedbackWorkerImageOnly(QThread):
-    finished = pyqtSignal(bytes, str, list)  # comparison_png, feedback_text, updated_history
+    finished = pyqtSignal(
+        bytes, str, list
+    )  # comparison_png, feedback_text, updated_history
     error = pyqtSignal(str)
     progress = pyqtSignal(str)
 
@@ -303,6 +322,7 @@ class FeedbackWorkerImageOnly(QThread):
 # ---------------------------------------------------------------------------
 # ImageOnlyFeedbackApp: メインウィンドウ
 # ---------------------------------------------------------------------------
+
 
 class ImageOnlyFeedbackApp(QMainWindow):
     def __init__(self):
@@ -397,7 +417,9 @@ class ImageOnlyFeedbackApp(QMainWindow):
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("QScrollArea { border: none; background: #f5f5f5; }")
+        self.scroll_area.setStyleSheet(
+            "QScrollArea { border: none; background: #f5f5f5; }"
+        )
 
         self.feedback_container = QWidget()
         self.feedback_layout = QVBoxLayout(self.feedback_container)
@@ -485,7 +507,10 @@ class ImageOnlyFeedbackApp(QMainWindow):
             if not qimg.isNull():
                 pixmap = QPixmap.fromImage(qimg)
                 pixmap = pixmap.scaled(
-                    300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation,
+                    300,
+                    300,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
                 )
                 self.ref_image_label.setPixmap(pixmap)
         except Exception:
@@ -516,7 +541,9 @@ class ImageOnlyFeedbackApp(QMainWindow):
 
         user_data = self.canvas.get_all_data()
         if user_data["stroke_count"] == 0:
-            QMessageBox.warning(self, "警告", "キャンバスに何か書いてから送信してください。")
+            QMessageBox.warning(
+                self, "警告", "キャンバスに何か書いてから送信してください。"
+            )
             return
 
         if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -553,7 +580,9 @@ class ImageOnlyFeedbackApp(QMainWindow):
     def _on_worker_progress(self, message: str):
         self.status_bar.showMessage(message)
 
-    def _on_worker_finished(self, comparison_png: bytes, feedback_text: str, updated_history: list):
+    def _on_worker_finished(
+        self, comparison_png: bytes, feedback_text: str, updated_history: list
+    ):
         self.conversation_history = updated_history
 
         saved_path = self._save_attempt(self.worker.user_data, feedback_text)
@@ -566,9 +595,13 @@ class ImageOnlyFeedbackApp(QMainWindow):
             self.scroll_area.verticalScrollBar().maximum()
         )
         from PyQt5.QtCore import QTimer
-        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()
-        ))
+
+        QTimer.singleShot(
+            100,
+            lambda: self.scroll_area.verticalScrollBar().setValue(
+                self.scroll_area.verticalScrollBar().maximum()
+            ),
+        )
 
         self.canvas.clear_canvas()
         self.submit_btn.setEnabled(True)
@@ -588,7 +621,9 @@ class ImageOnlyFeedbackApp(QMainWindow):
         self.undo_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
         self.status_bar.showMessage("エラーが発生しました")
-        QMessageBox.critical(self, "エラー", f"フィードバック生成に失敗しました:\n\n{error_text}")
+        QMessageBox.critical(
+            self, "エラー", f"フィードバック生成に失敗しました:\n\n{error_text}"
+        )
         self.worker = None
 
     # ---------------------------------------------------------------
@@ -637,6 +672,7 @@ class ImageOnlyFeedbackApp(QMainWindow):
 # ---------------------------------------------------------------------------
 # エントリーポイント
 # ---------------------------------------------------------------------------
+
 
 def main():
     app = QApplication(sys.argv)
