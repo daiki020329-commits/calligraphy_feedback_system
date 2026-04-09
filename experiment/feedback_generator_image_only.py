@@ -14,15 +14,20 @@ import anthropic
 
 SYSTEM_PROMPT_IMAGE_ONLY = """あなたは書道の先生です。生徒が繰り返し練習しており、毎回お手本と比較したフィードバックを求めています。
 
-## 分析の観点
-1. 画像から形状を分析してください（バランス、はね、とめ、払い、線の太さの変化）
-2. 前回の試みと比較して、改善された点・まだ課題が残る点を指摘してください
+## 入力データの説明
+- 画像1（左右比較）: 左がお手本、右が生徒の作品です。それぞれの全体像を確認できます
+- 画像2（重ね合わせ）: お手本（赤）と生徒の作品（青）を同じ座標上に重ねた画像です。ズレている箇所が視覚的にわかります
+
+## 分析の手順
+1. まず画像1（左右比較）で、お手本と生徒の作品の形状の違いを把握してください（バランス、はね、とめ、払い、線の太さの変化）
+2. 画像2（重ね合わせ）で、具体的にどの部分がどの方向にズレているかを特定してください
+3. 画像で気になる箇所（特に、字の上手さ、綺麗さに繋がる箇所）について、フィードバックを提供してください。
+4. 前回の試みと比較して、改善された点・まだ課題が残る点を指摘してください
 
 ## フィードバックのルール
-- 比喩やイメージを使って伝える（「羽が落ちるように軽く」「川の流れのように滑らかに」など）
 - 具体的な身体の動かし方を提案する（「息を吐きながら」「手首を柔らかく」など）
 - 良い点を必ず1つ含める
-- 3〜5文で簡潔にまとめる
+- 3〜6文で簡潔にまとめる
 - 書道の専門用語は最小限にし、初心者にも分かりやすく
 - 2回目以降は、前回からの変化に必ず言及する（「前回より〜が良くなりました」など）"""
 
@@ -32,6 +37,7 @@ MAX_CONVERSATION_TURNS = 5
 def generate_feedback_image_only(
     comparison_image: bytes,
     character: str = "",
+    overlay_image: bytes | None = None,
     conversation_history: list[dict] | None = None,
     attempt_number: int = 1,
     model: str = "claude-sonnet-4-5-20250929",
@@ -39,8 +45,9 @@ def generate_feedback_image_only(
     """比較画像のみからマルチターンでフィードバックを生成する。
 
     Args:
-        comparison_image: 比較画像のPNGバイト列
+        comparison_image: 左右比較画像のPNGバイト列
         character: 対象の文字（例: "永"）
+        overlay_image: 重ね合わせ画像のPNGバイト列（省略可）
         conversation_history: これまでの会話履歴（Noneなら新規開始）
         attempt_number: 試行番号（1始まり）
         model: 使用するClaudeモデル
@@ -58,33 +65,49 @@ def generate_feedback_image_only(
         keep = (MAX_CONVERSATION_TURNS - 1) * 2
         conversation_history = conversation_history[-keep:]
 
-    image_b64 = base64.standard_b64encode(comparison_image).decode("utf-8")
+    comparison_b64 = base64.standard_b64encode(comparison_image).decode("utf-8")
 
     if attempt_number == 1:
         user_text = f"以下は「{character}」の書道練習の結果です。\n\n"
-        user_text += "左がお手本、右が生徒の作品です。\n\n"
     else:
         user_text = f"「{character}」の{attempt_number}回目の練習結果です。\n\n"
-        user_text += "左がお手本、右が今回の作品です。\n\n"
 
     user_text += "画像を分析して、フィードバックをお願いします。"
 
-    user_message = {
-        "role": "user",
-        "content": [
+    content = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": comparison_b64,
+            },
+        },
+    ]
+
+    if overlay_image is not None:
+        overlay_b64 = base64.standard_b64encode(overlay_image).decode("utf-8")
+        content.append(
             {
                 "type": "image",
                 "source": {
                     "type": "base64",
                     "media_type": "image/png",
-                    "data": image_b64,
+                    "data": overlay_b64,
                 },
-            },
-            {
-                "type": "text",
-                "text": user_text,
-            },
-        ],
+            }
+        )
+
+    content.append(
+        {
+            "type": "text",
+            "text": user_text,
+        }
+    )
+
+    user_message = {
+        "role": "user",
+        "content": content,
     }
 
     messages = conversation_history + [user_message]
@@ -100,9 +123,11 @@ def generate_feedback_image_only(
 
     # 会話履歴を更新
     conversation_history.append(user_message)
-    conversation_history.append({
-        "role": "assistant",
-        "content": feedback_text,
-    })
+    conversation_history.append(
+        {
+            "role": "assistant",
+            "content": feedback_text,
+        }
+    )
 
     return conversation_history, feedback_text

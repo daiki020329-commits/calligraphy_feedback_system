@@ -227,6 +227,104 @@ def _create_comparison_png(
     return _pixmap_to_png(pixmap)
 
 
+# お手本（赤系）・ユーザー（青系）の色定義
+_REF_INK_COLOR = (200, 60, 60)
+_USER_INK_COLOR = (40, 80, 180)
+
+
+def _draw_brush_segment_colored(
+    painter: QPainter,
+    x1: float, y1: float, x2: float, y2: float,
+    width1: float, width2: float, alpha: int,
+    ink_color: tuple,
+):
+    """色指定可能なブラシセグメント描画。"""
+    length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    if length < 0.5:
+        return
+    segments = max(3, int(length / 3))
+    for i in range(segments):
+        t = i / segments
+        t_next = (i + 1) / segments
+        cx = x1 + t * (x2 - x1)
+        cy = y1 + t * (y2 - y1)
+        nx = x1 + t_next * (x2 - x1)
+        ny = y1 + t_next * (y2 - y1)
+        cw = width1 + t * (width2 - width1)
+        nw = width1 + t_next * (width2 - width1)
+        avg_w = (cw + nw) / 2
+
+        pen = QPen(QColor(*ink_color, alpha))
+        pen.setWidthF(max(1.0, avg_w))
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(int(cx), int(cy), int(nx), int(ny))
+
+
+def _draw_stroke_colored(
+    painter: QPainter, stroke: list, canvas_size: int, ink_color: tuple,
+):
+    """色指定可能なストローク描画。"""
+    if len(stroke) < 2:
+        return
+    smoothed = _smooth_pressure(stroke)
+    for i in range(len(stroke) - 1):
+        nx1, ny1, _, _ = stroke[i]
+        nx2, ny2, _, _ = stroke[i + 1]
+        p1, p2 = smoothed[i], smoothed[i + 1]
+        x1 = nx1 * canvas_size
+        y1 = ny1 * canvas_size
+        x2 = nx2 * canvas_size
+        y2 = ny2 * canvas_size
+        w1 = _MIN_WIDTH + (p1 ** _PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
+        w2 = _MIN_WIDTH + (p2 ** _PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
+        alpha = 150 + int((p1 ** 1.5) * 105)
+        _draw_brush_segment_colored(
+            painter, x1, y1, x2, y2, w1, w2, alpha, ink_color,
+        )
+
+
+def _create_overlay_png(
+    ref_data: dict,
+    user_data: dict,
+    size: int = 600,
+) -> bytes:
+    """お手本（赤）とユーザー（青）を重ね合わせた画像を生成して PNG を返す。"""
+    label_h = 40
+    total_h = size + label_h
+
+    pixmap = QPixmap(size, total_h)
+    pixmap.fill(_PAPER_COLOR)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    # ラベル（凡例）
+    label_font = QFont()
+    label_font.setPointSize(12)
+    label_font.setBold(True)
+    painter.setFont(label_font)
+    painter.setPen(QColor(*_REF_INK_COLOR))
+    painter.drawText(20, 28, "■ お手本")
+    painter.setPen(QColor(*_USER_INK_COLOR))
+    painter.drawText(160, 28, "■ ユーザー")
+
+    # 枠線
+    painter.setPen(QPen(_BORDER_COLOR, 2))
+    painter.drawRect(0, label_h, size - 1, size - 1)
+
+    # お手本を先に描画（赤系）
+    for s in ref_data.get("strokes", []):
+        _draw_stroke_colored(painter, s, size, _REF_INK_COLOR)
+
+    # ユーザーを上に重ねて描画（青系）
+    for s in user_data.get("strokes", []):
+        _draw_stroke_colored(painter, s, size, _USER_INK_COLOR)
+
+    painter.end()
+    return _pixmap_to_png(pixmap)
+
+
 # ---------------------------------------------------------------------------
 # FeedbackEntry
 # ---------------------------------------------------------------------------
@@ -295,6 +393,7 @@ class FeedbackWorkerImageOnly(QThread):
         conversation_history: list[dict],
         attempt_number: int,
         comparison_png: bytes,
+        overlay_png: bytes,
     ):
         super().__init__()
         self.user_data = user_data
@@ -302,12 +401,14 @@ class FeedbackWorkerImageOnly(QThread):
         self.conversation_history = conversation_history
         self.attempt_number = attempt_number
         self.comparison_png = comparison_png
+        self.overlay_png = overlay_png
 
     def run(self):
         try:
             self.progress.emit("フィードバックを生成中...")
             updated_history, feedback_text = generate_feedback_image_only(
                 comparison_image=self.comparison_png,
+                overlay_image=self.overlay_png,
                 character=self.character,
                 conversation_history=self.conversation_history,
                 attempt_number=self.attempt_number,
@@ -564,6 +665,7 @@ class ImageOnlyFeedbackApp(QMainWindow):
 
         self.status_bar.showMessage("比較画像を生成中...")
         comparison_png = _create_comparison_png(self.reference_data, user_data)
+        overlay_png = _create_overlay_png(self.reference_data, user_data)
 
         self.worker = FeedbackWorkerImageOnly(
             user_data=user_data,
@@ -571,6 +673,7 @@ class ImageOnlyFeedbackApp(QMainWindow):
             conversation_history=list(self.conversation_history),
             attempt_number=self.attempt_number,
             comparison_png=comparison_png,
+            overlay_png=overlay_png,
         )
         self.worker.progress.connect(self._on_worker_progress)
         self.worker.finished.connect(self._on_worker_finished)

@@ -41,9 +41,15 @@ def extract_features(stroke_data: dict) -> dict:
     # --- 加速度特徴量 ---
     accelerations = _compute_accelerations(strokes)
     accel_features = {
-        "acceleration_mean": float(np.mean(accelerations)) if len(accelerations) > 0 else 0.0,
-        "acceleration_max_positive": float(np.max(accelerations)) if len(accelerations) > 0 else 0.0,
-        "acceleration_max_negative": float(np.min(accelerations)) if len(accelerations) > 0 else 0.0,
+        "acceleration_mean": (
+            float(np.mean(accelerations)) if len(accelerations) > 0 else 0.0
+        ),
+        "acceleration_max_positive": (
+            float(np.max(accelerations)) if len(accelerations) > 0 else 0.0
+        ),
+        "acceleration_max_negative": (
+            float(np.min(accelerations)) if len(accelerations) > 0 else 0.0
+        ),
     }
 
     # --- 時間特徴量 ---
@@ -123,7 +129,7 @@ def _compute_speeds(strokes: list) -> np.ndarray:
                 continue
             dx = xs[i] - xs[i - 1]
             dy = ys[i] - ys[i - 1]
-            dist = np.sqrt(dx ** 2 + dy ** 2)
+            dist = np.sqrt(dx**2 + dy**2)
             speed = dist / (dt / 1000.0)  # 正規化座標/秒
             all_speeds.append(speed)
 
@@ -148,7 +154,7 @@ def _compute_accelerations(strokes: list) -> np.ndarray:
                 continue
             dx = xs[i] - xs[i - 1]
             dy = ys[i] - ys[i - 1]
-            dist = np.sqrt(dx ** 2 + dy ** 2)
+            dist = np.sqrt(dx**2 + dy**2)
             speeds.append(dist / (dt / 1000.0))
             speed_times.append((ts[i] + ts[i - 1]) / 2.0)
 
@@ -160,6 +166,79 @@ def _compute_accelerations(strokes: list) -> np.ndarray:
             all_accels.append(accel)
 
     return np.array(all_accels) if all_accels else np.array([0.0])
+
+
+def extract_per_stroke_features(stroke_data: dict) -> list[dict]:
+    """ストロークごとの特徴量を抽出する。
+
+    Args:
+        stroke_data: {"strokes": [[[x, y, pressure, time], ...], ...], ...}
+
+    Returns:
+        [
+            {
+                "stroke_index": 1,
+                "pressure_mean": float,
+                "pressure_start": float,  # 最初20%
+                "pressure_mid": float,    # 中間60%
+                "pressure_end": float,    # 最後20%
+                "speed_mean": float,
+                "speed_start": float,
+                "speed_mid": float,
+                "speed_end": float,
+                "acceleration_mean": float | None,  # 点数不足時はNone
+                "smoothness_jerk": float | None,     # 点数不足時はNone
+                "duration_ms": float,
+            },
+            ...
+        ]
+    """
+    strokes = stroke_data["strokes"]
+    results = []
+
+    for i, stroke in enumerate(strokes):
+        if len(stroke) < 2:
+            continue
+
+        arr = np.array(stroke, dtype=float)
+        pressures = arr[:, 2]
+        times = arr[:, 3]
+
+        # 筆圧のフェーズ別特徴量
+        p_features = _extract_phase_features(pressures, "pressure")
+
+        # 速度のフェーズ別特徴量（1ストローク分が入ったリストを渡す）
+        speeds = _compute_speeds([stroke])
+        s_features = _extract_phase_features(speeds, "speed")
+
+        # 加速度（3点以上必要）
+        accels = _compute_accelerations([stroke])
+        accel_mean = float(np.mean(accels)) if len(stroke) >= 3 else None
+
+        # 躍度・滑らかさ（4点以上必要）
+        jerk = _compute_jerk([stroke]) if len(stroke) >= 4 else None
+
+        # 持続時間
+        duration_ms = float(times[-1] - times[0])
+
+        results.append(
+            {
+                "stroke_index": i + 1,
+                "pressure_mean": p_features["pressure_mean"],
+                "pressure_start": p_features["pressure_start"],
+                "pressure_mid": p_features["pressure_mid"],
+                "pressure_end": p_features["pressure_end"],
+                "speed_mean": s_features["speed_mean"],
+                "speed_start": s_features["speed_start"],
+                "speed_mid": s_features["speed_mid"],
+                "speed_end": s_features["speed_end"],
+                "acceleration_mean": accel_mean,
+                "smoothness_jerk": jerk,
+                "duration_ms": duration_ms,
+            }
+        )
+
+    return results
 
 
 def _count_pauses(strokes: list, threshold_ms: float = 100.0) -> int:
@@ -202,7 +281,7 @@ def _compute_jerk(strokes: list) -> float:
                 continue
             dx = xs[i] - xs[i - 1]
             dy = ys[i] - ys[i - 1]
-            dist = np.sqrt(dx ** 2 + dy ** 2)
+            dist = np.sqrt(dx**2 + dy**2)
             speeds.append(dist / (dt / 1000.0))
             speed_times.append((ts[i] + ts[i - 1]) / 2.0)
 

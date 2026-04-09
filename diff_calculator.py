@@ -114,6 +114,81 @@ def diff_to_text(diffs: dict, threshold_pct: float = 10.0) -> str:
     return "\n".join(lines)
 
 
+def per_stroke_diff_to_text(ref_per_stroke: list[dict], user_per_stroke: list[dict]) -> str:
+    """ストローク単位の特徴量差分をLLM用テキストに変換する。
+
+    Args:
+        ref_per_stroke: お手本のストローク別特徴量（extract_per_stroke_features の出力）
+        user_per_stroke: ユーザーのストローク別特徴量
+
+    Returns:
+        LLMに渡すテキスト
+    """
+    lines = ["【ストローク別の身体的データ比較】"]
+
+    ref_count = len(ref_per_stroke)
+    user_count = len(user_per_stroke)
+    pair_count = min(ref_count, user_count)
+
+    for i in range(pair_count):
+        ref = ref_per_stroke[i]
+        user = user_per_stroke[i]
+        stroke_idx = ref["stroke_index"]
+
+        lines.append(f"\n▼ 第{stroke_idx}画:")
+
+        # 筆圧
+        p_parts = []
+        for phase, label in [("start", "入り"), ("mid", "中盤"), ("end", "抜き")]:
+            r_val = ref[f"pressure_{phase}"]
+            u_val = user[f"pressure_{phase}"]
+            direction = _get_direction("pressure", u_val - r_val, _pct(r_val, u_val))
+            p_parts.append(f"{label}: お手本{r_val:.2f}→ユーザー{u_val:.2f}（{direction}）")
+        lines.append(f"  筆圧 — {' / '.join(p_parts)}")
+
+        # 速度
+        s_parts = []
+        for phase, label in [("start", "入り"), ("mid", "中盤"), ("end", "抜き")]:
+            r_val = ref[f"speed_{phase}"]
+            u_val = user[f"speed_{phase}"]
+            direction = _get_direction("speed", u_val - r_val, _pct(r_val, u_val))
+            s_parts.append(f"{label}: お手本{r_val:.1f}→ユーザー{u_val:.1f}（{direction}）")
+        lines.append(f"  速度 — {' / '.join(s_parts)}")
+
+        # 加速度（データがある場合のみ）
+        if ref.get("acceleration_mean") is not None and user.get("acceleration_mean") is not None:
+            r_val = ref["acceleration_mean"]
+            u_val = user["acceleration_mean"]
+            direction = _get_direction("acceleration", u_val - r_val, _pct(r_val, u_val))
+            lines.append(f"  加速度（平均） — お手本{r_val:.1f}→ユーザー{u_val:.1f}（{direction}）")
+
+        # 滑らかさ・躍度（データがある場合のみ）
+        if ref.get("smoothness_jerk") is not None and user.get("smoothness_jerk") is not None:
+            r_val = ref["smoothness_jerk"]
+            u_val = user["smoothness_jerk"]
+            direction = _get_direction("smoothness_jerk", u_val - r_val, _pct(r_val, u_val))
+            lines.append(f"  滑らかさ（躍度） — お手本{r_val:.1f}→ユーザー{u_val:.1f}（{direction}）")
+
+    # 画数の過不足を明示
+    if ref_count != user_count:
+        lines.append(f"\n※ お手本は{ref_count}画、ユーザーは{user_count}画", )
+        if user_count < ref_count:
+            missing = [str(j) for j in range(user_count + 1, ref_count + 1)]
+            lines.append(f"  （第{'・'.join(missing)}画が不足）")
+        else:
+            extra = [str(j) for j in range(ref_count + 1, user_count + 1)]
+            lines.append(f"  （第{'・'.join(extra)}画が余分）")
+
+    return "\n".join(lines)
+
+
+def _pct(ref_val: float, user_val: float) -> float:
+    """パーセンテージ差分を計算する。"""
+    if abs(ref_val) > 1e-8:
+        return ((user_val - ref_val) / abs(ref_val)) * 100.0
+    return 0.0 if abs(user_val - ref_val) < 1e-8 else float("inf")
+
+
 def _get_direction(key: str, abs_diff: float, pct: float) -> str:
     """差分の方向を自然な日本語で表現する。"""
     if abs(pct) < 10:
