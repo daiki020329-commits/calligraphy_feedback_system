@@ -14,6 +14,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 import sys
 
@@ -31,6 +32,9 @@ from image_generator import render_stroke_to_image
 # ---------------------------------------------------------------------------
 # DTW 類似度
 # ---------------------------------------------------------------------------
+
+_DTW_SENSITIVITY: float = 3.0  # exp(-α*d) の α
+
 
 def _extract_xy_sequences(stroke_data: dict) -> list[np.ndarray]:
     """ストロークデータから各ストロークの (x, y) 座標列を抽出する。"""
@@ -96,10 +100,10 @@ def _extract_speed_sequences(stroke_data: dict, min_dt_ms: float = 20.0) -> list
     return sequences
 
 
-def compute_dtw_similarity(ref_data: dict, user_data: dict) -> float:
-    """ストロークごとの DTW 距離の平均から類似度を算出する。
+def _dtw_similarity(ref_seqs: list[np.ndarray], user_seqs: list[np.ndarray]) -> float:
+    """ストローク列ペアの DTW 距離の平均から類似度を算出する共通関数。
 
-    類似度 = 1 / (1 + mean_distance)
+    類似度 = exp(-α * mean_distance)  (α = _DTW_SENSITIVITY)
 
     ストローク数が異なる場合、少ない方に合わせてペアリングする。
     余ったストロークはペナルティとして最大距離を加算する。
@@ -107,9 +111,6 @@ def compute_dtw_similarity(ref_data: dict, user_data: dict) -> float:
     Returns:
         (0, 1] の範囲の類似度スコア
     """
-    ref_seqs = _extract_xy_sequences(ref_data)
-    user_seqs = _extract_xy_sequences(user_data)
-
     if not ref_seqs or not user_seqs:
         return 0.0
 
@@ -128,74 +129,36 @@ def compute_dtw_similarity(ref_data: dict, user_data: dict) -> float:
         penalty = max(distances) if distances and max(distances) > 0 else 1.0
         distances.extend([penalty] * extra)
 
-    mean_dist = np.mean(distances)
-    return 1.0 / (1.0 + mean_dist)
+    mean_dist = float(np.mean(distances))
+    return math.exp(-_DTW_SENSITIVITY * mean_dist)
+
+
+def compute_dtw_similarity(ref_data: dict, user_data: dict) -> float:
+    """ストロークごとの座標列 DTW 類似度を算出する。"""
+    return _dtw_similarity(
+        _extract_xy_sequences(ref_data),
+        _extract_xy_sequences(user_data),
+    )
 
 
 def compute_dtw_pressure_similarity(ref_data: dict, user_data: dict) -> float:
-    """ストロークごとの筆圧列の DTW 距離の平均から類似度を算出する。
-
-    類似度 = 1 / (1 + mean_distance)
-
-    Returns:
-        (0, 1] の範囲の類似度スコア
-    """
-    ref_seqs = _extract_pressure_sequences(ref_data)
-    user_seqs = _extract_pressure_sequences(user_data)
-
-    if not ref_seqs or not user_seqs:
-        return 0.0
-
-    distances = []
-    n_pairs = min(len(ref_seqs), len(user_seqs))
-
-    for i in range(n_pairs):
-        alignment = dtw(ref_seqs[i], user_seqs[i])
-        normalized_dist = alignment.distance / len(alignment.index1)
-        distances.append(normalized_dist)
-
-    extra = abs(len(ref_seqs) - len(user_seqs))
-    if extra > 0:
-        penalty = max(distances) if distances and max(distances) > 0 else 1.0
-        distances.extend([penalty] * extra)
-
-    mean_dist = np.mean(distances)
-    return 1.0 / (1.0 + mean_dist)
+    """ストロークごとの筆圧列 DTW 類似度を算出する。"""
+    return _dtw_similarity(
+        _extract_pressure_sequences(ref_data),
+        _extract_pressure_sequences(user_data),
+    )
 
 
 def compute_dtw_speed_similarity(ref_data: dict, user_data: dict) -> float:
-    """ストロークごとの速度列の DTW 距離の平均から類似度を算出する。
-
-    類似度 = 1 / (1 + mean_distance)
-
-    Returns:
-        (0, 1] の範囲の類似度スコア
-    """
-    ref_seqs = _extract_speed_sequences(ref_data)
-    user_seqs = _extract_speed_sequences(user_data)
-
-    if not ref_seqs or not user_seqs:
-        return 0.0
-
-    distances = []
-    n_pairs = min(len(ref_seqs), len(user_seqs))
-
-    for i in range(n_pairs):
-        alignment = dtw(ref_seqs[i], user_seqs[i])
-        normalized_dist = alignment.distance / len(alignment.index1)
-        distances.append(normalized_dist)
-
-    extra = abs(len(ref_seqs) - len(user_seqs))
-    if extra > 0:
-        penalty = max(distances) if distances and max(distances) > 0 else 1.0
-        distances.extend([penalty] * extra)
-
-    mean_dist = np.mean(distances)
-    return 1.0 / (1.0 + mean_dist)
+    """ストロークごとの速度列 DTW 類似度を算出する。"""
+    return _dtw_similarity(
+        _extract_speed_sequences(ref_data),
+        _extract_speed_sequences(user_data),
+    )
 
 
 # ---------------------------------------------------------------------------
-# SSIM 類似度
+# SSIM 類似度 / IoU / 線部分 SSIM
 # ---------------------------------------------------------------------------
 
 def _render_to_grayscale(stroke_data: dict, size: int = 600) -> np.ndarray:
@@ -203,6 +166,30 @@ def _render_to_grayscale(stroke_data: dict, size: int = 600) -> np.ndarray:
     png_bytes = render_stroke_to_image(stroke_data, size=size)
     img = Image.open(io.BytesIO(png_bytes)).convert("L")
     return np.array(img)
+
+
+def _render_to_binary(stroke_data: dict, size: int = 600) -> np.ndarray:
+    """ストロークデータを二値化マスク（線=True, 背景=False）に変換する。"""
+    gray = _render_to_grayscale(stroke_data, size)
+    return gray < 240
+
+
+def _align_binary_by_centroid(ref_bin: np.ndarray, user_bin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """二値マスク同士を重心が一致するように平行移動で揃える。
+
+    ref を基準とし、user を平行移動させる。
+    戻り値は同じサイズの (ref_bin, aligned_user_bin)。
+    """
+    from scipy.ndimage import center_of_mass, shift
+
+    ref_cm = center_of_mass(ref_bin)
+    user_cm = center_of_mass(user_bin)
+
+    dy = ref_cm[0] - user_cm[0]
+    dx = ref_cm[1] - user_cm[1]
+
+    aligned_user = shift(user_bin.astype(float), [dy, dx], order=0, mode='constant', cval=0.0) > 0.5
+    return ref_bin, aligned_user
 
 
 def compute_ssim_similarity(ref_data: dict, user_data: dict, size: int = 600) -> float:
@@ -214,6 +201,94 @@ def compute_ssim_similarity(ref_data: dict, user_data: dict, size: int = 600) ->
     ref_gray = _render_to_grayscale(ref_data, size)
     user_gray = _render_to_grayscale(user_data, size)
     score = structural_similarity(ref_gray, user_gray)
+    return max(0.0, score)
+
+
+def compute_iou_similarity(ref_data: dict, user_data: dict, size: int = 600) -> float:
+    """重心を揃えた二値化画像の IoU（Intersection over Union）を算出する。
+
+    平行移動の影響を除去し、形の違いのみを評価する。
+
+    Returns:
+        [0, 1] の範囲の類似度スコア
+    """
+    ref_bin = _render_to_binary(ref_data, size)
+    user_bin = _render_to_binary(user_data, size)
+
+    if not np.any(ref_bin) or not np.any(user_bin):
+        if not np.any(ref_bin) and not np.any(user_bin):
+            return 1.0
+        return 0.0
+
+    ref_bin, user_bin = _align_binary_by_centroid(ref_bin, user_bin)
+
+    intersection = np.sum(ref_bin & user_bin)
+    union = np.sum(ref_bin | user_bin)
+
+    if union == 0:
+        return 1.0
+    return float(intersection) / float(union)
+
+
+def compute_line_ssim_similarity(ref_data: dict, user_data: dict, size: int = 600) -> float:
+    """重心揃え後、線部分のみを切り出して SSIM を算出する。
+
+    1) グレースケール画像を重心基準で平行移動して位置を揃える
+    2) 揃えた画像の線領域（OR）の bounding box で切り出す
+    3) 切り出した領域のみで SSIM を計算する
+
+    Returns:
+        [0, 1] の範囲の類似度スコア
+    """
+    from scipy.ndimage import center_of_mass, shift
+
+    ref_gray = _render_to_grayscale(ref_data, size)
+    user_gray = _render_to_grayscale(user_data, size)
+
+    ref_bin = ref_gray < 240
+    user_bin = user_gray < 240
+
+    if not np.any(ref_bin) or not np.any(user_bin):
+        if not np.any(ref_bin) and not np.any(user_bin):
+            return 1.0
+        return 0.0
+
+    # 重心を揃える（user を ref に合わせる）
+    ref_cm = center_of_mass(ref_bin)
+    user_cm = center_of_mass(user_bin)
+    dy = ref_cm[0] - user_cm[0]
+    dx = ref_cm[1] - user_cm[1]
+
+    user_gray = shift(user_gray.astype(float), [dy, dx], order=1, mode='constant', cval=255.0).astype(np.uint8)
+    user_bin = user_gray < 240
+
+    combined = ref_bin | user_bin
+
+    if not np.any(combined):
+        return 1.0
+
+    rows = np.any(combined, axis=1)
+    cols = np.any(combined, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+
+    ref_crop = ref_gray[rmin:rmax + 1, cmin:cmax + 1]
+    user_crop = user_gray[rmin:rmax + 1, cmin:cmax + 1]
+
+    # SSIM の win_size はクロップ領域が小さい場合に対応
+    min_dim = min(ref_crop.shape[0], ref_crop.shape[1])
+    win_size = min(7, min_dim)
+    if win_size % 2 == 0:
+        win_size -= 1
+    if win_size < 3:
+        win_size = 3
+        pad_h = max(0, win_size - ref_crop.shape[0])
+        pad_w = max(0, win_size - ref_crop.shape[1])
+        if pad_h > 0 or pad_w > 0:
+            ref_crop = np.pad(ref_crop, ((0, pad_h), (0, pad_w)), constant_values=255)
+            user_crop = np.pad(user_crop, ((0, pad_h), (0, pad_w)), constant_values=255)
+
+    score = structural_similarity(ref_crop, user_crop, win_size=win_size)
     return max(0.0, score)
 
 
@@ -280,7 +355,7 @@ def compute_composite_score_v2(
 def compute_three_scores(ref_data: dict, user_data: dict) -> dict:
     """見た目スコア・身体的スコア・複合スコアの3種類を算出する。
 
-    - 見た目スコア: SSIM のみ
+    - 見た目スコア: 0.7×IoU + 0.3×線部分SSIM
     - 身体的スコア: 0.2×DTW(xy) + 0.4×DTW(筆圧) + 0.4×DTW(速度)
     - 複合スコア: 0.5×見た目 + 0.5×身体的
 
@@ -290,6 +365,8 @@ def compute_three_scores(ref_data: dict, user_data: dict) -> dict:
             "dtw_pressure_similarity": float,
             "dtw_speed_similarity": float,
             "ssim_similarity": float,
+            "iou_similarity": float,
+            "line_ssim_similarity": float,
             "visual_score": float,
             "physical_score": float,
             "composite_score": float,
@@ -299,8 +376,10 @@ def compute_three_scores(ref_data: dict, user_data: dict) -> dict:
     dtw_pressure = compute_dtw_pressure_similarity(ref_data, user_data)
     dtw_speed = compute_dtw_speed_similarity(ref_data, user_data)
     ssim_sim = compute_ssim_similarity(ref_data, user_data)
+    iou = compute_iou_similarity(ref_data, user_data)
+    line_ssim = compute_line_ssim_similarity(ref_data, user_data)
 
-    visual_score = ssim_sim
+    visual_score = 0.7 * iou + 0.3 * line_ssim
     physical_score = 0.2 * dtw_xy + 0.4 * dtw_pressure + 0.4 * dtw_speed
     composite_score = 0.5 * visual_score + 0.5 * physical_score
 
@@ -309,6 +388,8 @@ def compute_three_scores(ref_data: dict, user_data: dict) -> dict:
         "dtw_pressure_similarity": round(dtw_pressure, 6),
         "dtw_speed_similarity": round(dtw_speed, 6),
         "ssim_similarity": round(ssim_sim, 6),
+        "iou_similarity": round(iou, 6),
+        "line_ssim_similarity": round(line_ssim, 6),
         "visual_score": round(visual_score, 6),
         "physical_score": round(physical_score, 6),
         "composite_score": round(composite_score, 6),
@@ -425,6 +506,8 @@ def main():
         "dtw_pressure_similarity",
         "dtw_speed_similarity",
         "ssim_similarity",
+        "iou_similarity",
+        "line_ssim_similarity",
         "visual_score",
         "physical_score",
         "composite_score",
