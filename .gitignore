@@ -20,6 +20,10 @@ experiment/user_data_numerical_feedback/
 *.csv
 *.png
 
+# ===== Secrets =====
+.env
+.env.*
+
 # ===== OS / Editor =====
 .DS_Store
 Thumbs.db
