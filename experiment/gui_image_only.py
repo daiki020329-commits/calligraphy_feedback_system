@@ -40,7 +40,6 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QImage
 from calligraphy_input_app import CalligraphyCanvas
 from experiment.feedback_generator_image_only import generate_feedback_image_only
 
-
 # ---------------------------------------------------------------------------
 # スタイル定数
 # ---------------------------------------------------------------------------
@@ -234,8 +233,13 @@ _USER_INK_COLOR = (40, 80, 180)
 
 def _draw_brush_segment_colored(
     painter: QPainter,
-    x1: float, y1: float, x2: float, y2: float,
-    width1: float, width2: float, alpha: int,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    width1: float,
+    width2: float,
+    alpha: int,
     ink_color: tuple,
 ):
     """色指定可能なブラシセグメント描画。"""
@@ -263,7 +267,10 @@ def _draw_brush_segment_colored(
 
 
 def _draw_stroke_colored(
-    painter: QPainter, stroke: list, canvas_size: int, ink_color: tuple,
+    painter: QPainter,
+    stroke: list,
+    canvas_size: int,
+    ink_color: tuple,
 ):
     """色指定可能なストローク描画。"""
     if len(stroke) < 2:
@@ -277,11 +284,19 @@ def _draw_stroke_colored(
         y1 = ny1 * canvas_size
         x2 = nx2 * canvas_size
         y2 = ny2 * canvas_size
-        w1 = _MIN_WIDTH + (p1 ** _PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
-        w2 = _MIN_WIDTH + (p2 ** _PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
-        alpha = 150 + int((p1 ** 1.5) * 105)
+        w1 = _MIN_WIDTH + (p1**_PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
+        w2 = _MIN_WIDTH + (p2**_PRESSURE_EXP) * (_MAX_WIDTH - _MIN_WIDTH)
+        alpha = 150 + int((p1**1.5) * 105)
         _draw_brush_segment_colored(
-            painter, x1, y1, x2, y2, w1, w2, alpha, ink_color,
+            painter,
+            x1,
+            y1,
+            x2,
+            y2,
+            w1,
+            w2,
+            alpha,
+            ink_color,
         )
 
 
@@ -647,12 +662,12 @@ class ImageOnlyFeedbackApp(QMainWindow):
             )
             return
 
-        if not os.environ.get("ANTHROPIC_API_KEY"):
+        if not os.environ.get("MY_PROJECT_KEY"):
             QMessageBox.warning(
                 self,
                 "APIキー未設定",
-                "環境変数 ANTHROPIC_API_KEY が設定されていません。\n"
-                "set ANTHROPIC_API_KEY=your-key で設定してください。",
+                "環境変数 MY_PROJECT_KEY が設定されていません。\n"
+                "set MY_PROJECT_KEY=your-key で設定してください。",
             )
             return
 
