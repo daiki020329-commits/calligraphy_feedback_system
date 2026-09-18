@@ -84,7 +84,9 @@ def generate_feedback(
     Returns:
         フィードバックテキスト
     """
-    client = anthropic.Anthropic()  # ここでAPIキーを環境変数から受け取る
+    client = (
+        anthropic.Anthropic()
+    )  # ここでAPIキーを環境変数から受け取る．Anthropic()の中身を少し編集しています．ANTHROPIC_API_KEY→MY_PROJECT_KEY
 
     comparison_b64 = base64.standard_b64encode(comparison_image).decode("utf-8")
 
@@ -166,7 +168,9 @@ def generate_feedback_multiturn(
     Returns:
         (更新された会話履歴, フィードバックテキスト) のタプル
     """
-    client = anthropic.Anthropic()
+    client = (
+        anthropic.Anthropic()
+    )  # ここでAPIキーを環境変数から受け取る．Anthropic()の中身を少し編集しています．ANTHROPIC_API_KEY→MY_PROJECT_KEY
 
     if conversation_history is None:
         conversation_history = []
